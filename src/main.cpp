@@ -30,13 +30,13 @@ String esid;
 String epass = "";
 
 typedef struct struct_message {
-  int id;
-  float temp;
-  float hum;
-  unsigned int readingId;
+  int distance_1_cm;
+  int distance_2_cm;
+  int direction;
 } struct_message;
 
 struct_message incomingReadings;
+
 MFRC522 mfrc522(SDA_SS_PIN, RST_PIN);
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 WebServer server(80);
@@ -49,17 +49,23 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
            mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
   Serial.println(macStr);
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
+  
+  
+  Serial.printf("distance 1 value (cm): %d \n", incomingReadings.distance_1_cm);
+  Serial.printf("distance 2 value (cm): %d \n", incomingReadings.distance_2_cm);
+  Serial.printf("direction value: %d \n", incomingReadings.direction);
+  if (incomingReadings.direction==0){
+    people_count ++;
+  }
+  else{
+    people_count --;
+  }
+  lcd.clear();
+  lcd.setCursor(0,0);
+  lcd.print("Number of people");
 
-  // board["id"] = incomingReadings.id;
-  // board["temperature"] = incomingReadings.temp;
-  // board["humidity"] = incomingReadings.hum;
-  // board["readingId"] = String(incomingReadings.readingId);
-
-
-  Serial.printf("Board ID %u: %u bytes\n", incomingReadings.id, len);
-  Serial.printf("t value: %4.2f \n", incomingReadings.temp);
-  Serial.printf("h value: %4.2f \n", incomingReadings.hum);
-  Serial.printf("readingID value: %d \n", incomingReadings.readingId);
+  lcd.setCursor(0, 1);
+  lcd.print(people_count);
   Serial.println();
 }
 
