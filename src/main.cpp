@@ -18,30 +18,45 @@ bool testWifi(void);
 void launchWeb(void);
 void setupAP(void);
 void createWebServer();
+void command(String cmd);
 
 int i = 0;
 int statusCode, btn1PrevState, btn2PrevState, btn3PrevState;
 const char *ssid = "parth";
 const char *password = "1234567890";
-static int people_count = 0;
+static int people_count = 0, in_people_count{}, out_people_count;
 String st;
 String content;
 String esid;
 String epass = "";
+int last_millis{-5000};
+int last_time_gps{};
+int count{0};
 
-typedef struct struct_message {
+
+typedef struct struct_message
+{
   int distance_1_cm;
   int distance_2_cm;
   int direction;
 } struct_message;
-
 struct_message incomingReadings;
+
+typedef struct ssid_send
+{
+  String ssid;
+} ssid_send;
+ssid_send SsidSend;
 
 MFRC522 mfrc522(SDA_SS_PIN, RST_PIN);
 LiquidCrystal_I2C lcd(0x27, 20, 4);
 WebServer server(80);
 
-void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+// A0:76:4E:1A:92:98
+uint8_t broadcastAddress[] = {0xA0, 0x76, 0x4E, 0x1A, 0x92, 0x98};
+
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
+{
   // Copies the sender mac address to a string
   char macStr[18];
   Serial.print("Packet received from: ");
@@ -49,30 +64,50 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
            mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
   Serial.println(macStr);
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
-  
-  
+
   Serial.printf("distance 1 value (cm): %d \n", incomingReadings.distance_1_cm);
   Serial.printf("distance 2 value (cm): %d \n", incomingReadings.distance_2_cm);
   Serial.printf("direction value: %d \n", incomingReadings.direction);
-  if (incomingReadings.direction==0){
-    people_count ++;
-  }
-  else{
-    people_count --;
-  }
   lcd.clear();
-  lcd.setCursor(0,0);
-  lcd.print("Number of people");
+  if (incomingReadings.direction == 0)
+  {
+    people_count++;
+    in_people_count++;
+   
+  }
+  else
+  {
+    people_count--;
+    out_people_count++;
+    
+  }
+  
+  lcd.clear();
+
+  lcd.setCursor(0, 2);
+  lcd.print("Out : ");
+  lcd.print(out_people_count);
 
   lcd.setCursor(0, 1);
-  lcd.print(people_count);
+  lcd.print("In : ");
+  lcd.print(in_people_count);
+
+  lcd.setCursor(0, 0);
+  lcd.print("Overall Number: ");
+  lcd.print(people_count); 
   Serial.println();
 }
 
+void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
+{
+  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+}
 
 void setup()
 {
   Serial.begin(9600);
+  Serial2.begin(115200);
   pinMode(BTN1, INPUT_PULLUP);
   pinMode(BTN2, INPUT_PULLUP);
   pinMode(BTN3, INPUT_PULLUP);
@@ -82,7 +117,7 @@ void setup()
   SPI.begin();
   mfrc522.PCD_Init();
   Serial.println(F("Read personal data on a MIFARE PICC:"));
- 
+
   lcd.init();
 
   lcd.backlight();
@@ -131,20 +166,16 @@ void setup()
   }
   Serial.println();
   Serial.println("Waiting.");
-  lcd.clear();
-   
+
   while ((WiFi.status() != WL_CONNECTED))
   {
     Serial.print(".");
-    lcd.setCursor(0, 0);
-    lcd.print("Waiting for WiFi");
-    lcd.setCursor(0, 1);
-    lcd.print("credential");
-    delay(100);
+    delay(10);
     server.handleClient();
   }
 
-  if (esp_now_init() != ESP_OK) {
+  if (esp_now_init() != ESP_OK)
+  {
     Serial.println("Error initializing ESP-NOW");
     return;
   }
@@ -152,14 +183,56 @@ void setup()
   // Once ESPNow is successfully Init, we will register for recv CB to
   // get recv packer info
   esp_now_register_recv_cb(OnDataRecv);
+  esp_now_register_send_cb(OnDataSent);
 
+  esp_now_peer_info_t peerInfo = {};
+  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+  peerInfo.encrypt = false;
+
+  if (esp_now_add_peer(&peerInfo) != ESP_OK)
+  {
+    Serial.println("Failed to add peer");
+    return;
+  }
+
+ 
+  esp_now_send(broadcastAddress, (uint8_t *)&SsidSend, sizeof(SsidSend));
+  lcd.clear();
   delay(1000);
+
+  // command("AT+CFUN=1,1"); 
+  // delay(10000);
+  
+  // command("ATI");
+  // command("AT+CMEE=1");
+  // // GPRS connect
+  // command("AT+NETAPN=\"airtelgprs.com\",\"\",\"\"");
+
+  // command("AT+CGDCONT=1,\"IP\",\"airtelgprs.com\"");
+  // command("AT+XIIC=1");
+  // command("AT+CGATT=1");
+
+  
+  
+  // command("AT+NWCHANNEL=1");
+  // command("AT+CGACT=1,1");
+  
+
+  // command("AT+HTTPSPARA=url,feedback-247.com/api/hygiene/save_footfall");
+  // command("AT+HTTPSPARA=port,443");
+  
+  // command("AT+HTTPSSETUP");
+  // command("AT+HTTPSACTION=0");
+  // command("AT+HTTPSCLOSE");
+  // command("+HTTPSRECV");
+
+  // command("AT+NETSHAREMODE=1");
+  // command("AT+NETSHAREACT=2,1,0,airtelgprs.com,card,card,0");
 
 }
 
 void loop()
 {
-
 
   if (digitalRead(BTN1) == 0)
   {
@@ -227,7 +300,8 @@ void loop()
   lcd.clear();
 }
 
-uint8_t calculate_checksum(uint8_t *data) {
+uint8_t calculate_checksum(uint8_t *data)
+{
   uint8_t checksum = 0;
   checksum |= 0b11000000 & data[1];
   checksum |= 0b00110000 & data[2];
@@ -235,7 +309,6 @@ uint8_t calculate_checksum(uint8_t *data) {
   checksum |= 0b00000011 & data[4];
   return checksum;
 }
-
 
 bool testWifi(void)
 {
@@ -338,11 +411,11 @@ void launchWeb()
 
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Please Connect to AP ");
+  lcd.print("Connect to AP ");
   lcd.setCursor(0, 1);
   lcd.print("GridenPower in WiFi");
   lcd.setCursor(0, 2);
-  lcd.print("And go to to SoftAP IP: ");
+  lcd.print("IP(open in chrome): ");
   lcd.setCursor(0, 3);
   lcd.print(WiFi.softAPIP());
   delay(1000);
@@ -400,3 +473,41 @@ void setupAP(void)
 }
 
 
+
+void command(String cmd)
+{
+  Serial.print("Sent Command: ");
+  Serial.println(cmd);
+  Serial2.println(cmd);
+  Serial2.write(0x0d);
+
+  while (!Serial2.available())
+  {
+    if (millis() - last_millis > 1000)
+    {
+      if (count > 15)
+      {
+        count = 0;
+        return;
+      }
+      else
+      {
+        last_millis = millis();
+        count++;
+      }
+    }
+  }
+  Serial.println("Recieved Data: ");
+
+  while (Serial2.available())
+  {
+    String resp = Serial2.readString();
+    Serial.println(resp);
+  }
+  Serial.println();
+}
+
+void getMessage()
+{
+  command("AT+CMGL=\"ALL\"");
+}
