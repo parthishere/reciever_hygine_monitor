@@ -14,12 +14,16 @@
 #define BTN2 14
 #define BTN3 27
 
+#define MONITOR_NUMBER 1100122
+
 bool testWifi(void);
 void launchWeb(void);
 void setupAP(void);
 void createWebServer();
 void command(String cmd);
-void send_feedback(int state);
+void send_feedback(int rating);
+void send_footfall(int ratingl, int in_footfalls, int out_footfalls);
+void send_cleaning_activity(int counter, int tag);
 
 int i = 0;
 int statusCode, btn1PrevState, btn2PrevState, btn3PrevState;
@@ -97,6 +101,12 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
   lcd.print("Overall Number: ");
   lcd.print(people_count); 
   Serial.println();
+  if (in_people_count>5){
+
+  }
+  if (out_people_count>5){
+    
+  }
 }
 
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
@@ -250,7 +260,7 @@ void loop()
     lcd.print("Medium");
     delay(2000);
     lcd.clear();
-    // send_feedback(1);
+    send_feedback(1);
   }
 
   if (digitalRead(BTN3) == 0)
@@ -259,7 +269,7 @@ void loop()
     lcd.print("Good");
     delay(2000);
     lcd.clear();
-    // send_feedback(2);
+    send_feedback(2);
   }
 
   MFRC522::MIFARE_Key key;
@@ -477,7 +487,8 @@ void setupAP(void)
 }
 
 String serverNameforSaveFeedback = "https://feedback-247.com/api/hygiene/save_feedback";
-void send_feedback(int state){
+
+void send_feedback(int rating){
   if(WiFi.status() == WL_CONNECTED) {
         WiFiClientSecure client;
         // HTTPClient http;
@@ -487,10 +498,90 @@ void send_feedback(int state){
         Serial.print("[HTTP] begin...\n");
         // configure traged server and url
         //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
-        String data = "monitor_no=1100122&rating=4";     
+        String data = "monitor_no="+ String(MONITOR_NUMBER) +"&rating="+rating;     
   
         if (client.connect("feedback-247.com", 443)) {
           client.println("POST /api/hygiene/save_feedback HTTP/1.1");
+          client.println("Host: feedback-247.com");
+          client.println("User-Agent: ESP32");
+          client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
+          client.println("Content-Type: application/x-www-form-urlencoded;");
+          client.println("Content-Length: "+String(data.length()));
+          client.println();
+          client.println(data);
+          Serial.println(F("Data were sent successfully"));
+           while (client.available() == 0)
+            ;
+          while (client.available())
+          {
+            char c = client.read();
+            Serial.write(c);
+          }
+          
+        } 
+
+        else {
+          Serial.println(F("Connection wasnt established"));
+        }
+        Serial.println("we got the responnse");
+        client.stop();
+    }
+}
+
+void send_footfall(int ratingl, int in_footfalls, int out_footfalls){
+  if(WiFi.status() == WL_CONNECTED) {
+        WiFiClientSecure client;
+        // HTTPClient http;
+        client.setInsecure();
+        
+
+        Serial.print("[HTTP] begin...\n");
+        // configure traged server and url
+        //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
+        String data = "monitor_no="+ String(MONITOR_NUMBER) +"&in_footfalls="+in_footfalls+"&out_footfalls="+out_footfalls;     
+  
+        if (client.connect("feedback-247.com", 443)) {
+          client.println("POST /api/hygiene/save_footfall HTTP/1.1");
+          client.println("Host: feedback-247.com");
+          client.println("User-Agent: ESP32");
+          client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
+          client.println("Content-Type: application/x-www-form-urlencoded;");
+          client.println("Content-Length: "+String(data.length()));
+          client.println();
+          client.println(data);
+          Serial.println(F("Data were sent successfully"));
+           while (client.available() == 0)
+            ;
+          while (client.available())
+          {
+            char c = client.read();
+            Serial.write(c);
+          }
+          
+        } 
+
+        else {
+          Serial.println(F("Connection wasnt established"));
+        }
+        Serial.println("we got the responnse");
+        client.stop();
+    }
+}
+
+void send_cleaning_activity(int counter, int tag){
+  if(WiFi.status() == WL_CONNECTED) {
+        WiFiClientSecure client;
+        // HTTPClient http;
+        client.setInsecure();
+        
+
+        Serial.print("[HTTP] begin...\n");
+        // configure traged server and url
+        //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
+        String data = "monitor_no="+ String(MONITOR_NUMBER) +"&counter="+counter;   
+  
+        if (client.connect("feedback-247.com", 443)) {
+          client.println("POST /api/hygiene/save_footfall HTTP/1.1");
           client.println("Host: feedback-247.com");
           client.println("User-Agent: ESP32");
           client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
