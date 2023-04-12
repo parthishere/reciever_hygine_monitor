@@ -250,7 +250,7 @@ void loop()
     lcd.print("Medium");
     delay(2000);
     lcd.clear();
-    send_feedback(1);
+    // send_feedback(1);
   }
 
   if (digitalRead(BTN3) == 0)
@@ -259,7 +259,7 @@ void loop()
     lcd.print("Good");
     delay(2000);
     lcd.clear();
-    send_feedback(2);
+    // send_feedback(2);
   }
 
   MFRC522::MIFARE_Key key;
@@ -476,36 +476,44 @@ void setupAP(void)
   Serial.println("over");
 }
 
-
+String serverNameforSaveFeedback = "https://feedback-247.com/api/hygiene/save_feedback";
 void send_feedback(int state){
   if(WiFi.status() == WL_CONNECTED) {
-
-        HTTPClient http;
+        WiFiClientSecure client;
+        // HTTPClient http;
+        client.setInsecure();
+        
 
         Serial.print("[HTTP] begin...\n");
         // configure traged server and url
         //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
-        http.begin("https://feedback-247.com/api/hygiene/save_feedback"); //HTTP
-        // token 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH
-        Serial.print("[HTTP] GET...\n");
-        // start connection and send HTTP header
-        int httpCode = http.GET();
+        String data = "monitor_no=1100122&rating=4";     
+  
+        if (client.connect("feedback-247.com", 443)) {
+          client.println("POST /api/hygiene/save_feedback HTTP/1.1");
+          client.println("Host: feedback-247.com");
+          client.println("User-Agent: ESP32");
+          client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
+          client.println("Content-Type: application/x-www-form-urlencoded;");
+          client.println("Content-Length: "+String(data.length()));
+          client.println();
+          client.println(data);
+          Serial.println(F("Data were sent successfully"));
+           while (client.available() == 0)
+            ;
+          while (client.available())
+          {
+            char c = client.read();
+            Serial.write(c);
+          }
+          
+        } 
 
-        // httpCode will be negative on error
-        if(httpCode > 0) {
-            // HTTP header has been send and Server response header has been handled
-            Serial.printf("[HTTP] GET... code: %d\n", httpCode);
-
-            // file found at server
-            if(httpCode == HTTP_CODE_OK) {
-                String payload = http.getString();
-                Serial.println(payload);
-            }
-        } else {
-            Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+        else {
+          Serial.println(F("Connection wasnt established"));
         }
-
-        http.end();
+        Serial.println("we got the responnse");
+        client.stop();
     }
 }
 
