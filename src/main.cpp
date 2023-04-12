@@ -10,15 +10,16 @@
 
 #define RST_PIN 15
 #define SDA_SS_PIN 5
-#define BTN1 27
-#define BTN2 4
-#define BTN3 14
+#define BTN1 4
+#define BTN2 14
+#define BTN3 27
 
 bool testWifi(void);
 void launchWeb(void);
 void setupAP(void);
 void createWebServer();
 void command(String cmd);
+void send_feedback(int state);
 
 int i = 0;
 int statusCode, btn1PrevState, btn2PrevState, btn3PrevState;
@@ -240,6 +241,7 @@ void loop()
     lcd.print("Bad");
     delay(2000);
     lcd.clear();
+    send_feedback(0);
   }
 
   if (digitalRead(BTN2) == 0)
@@ -248,6 +250,7 @@ void loop()
     lcd.print("Medium");
     delay(2000);
     lcd.clear();
+    send_feedback(1);
   }
 
   if (digitalRead(BTN3) == 0)
@@ -256,6 +259,7 @@ void loop()
     lcd.print("Good");
     delay(2000);
     lcd.clear();
+    send_feedback(2);
   }
 
   MFRC522::MIFARE_Key key;
@@ -472,6 +476,38 @@ void setupAP(void)
   Serial.println("over");
 }
 
+
+void send_feedback(int state){
+  if(WiFi.status() == WL_CONNECTED) {
+
+        HTTPClient http;
+
+        Serial.print("[HTTP] begin...\n");
+        // configure traged server and url
+        //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
+        http.begin("https://feedback-247.com/api/hygiene/save_feedback"); //HTTP
+        // token 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH
+        Serial.print("[HTTP] GET...\n");
+        // start connection and send HTTP header
+        int httpCode = http.GET();
+
+        // httpCode will be negative on error
+        if(httpCode > 0) {
+            // HTTP header has been send and Server response header has been handled
+            Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+
+            // file found at server
+            if(httpCode == HTTP_CODE_OK) {
+                String payload = http.getString();
+                Serial.println(payload);
+            }
+        } else {
+            Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+        }
+
+        http.end();
+    }
+}
 
 
 void command(String cmd)
