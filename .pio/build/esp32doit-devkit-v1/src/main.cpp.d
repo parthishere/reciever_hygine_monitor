@@ -244,4 +244,6 @@
  /home/parthishere/.platformio/packages/framework-arduinoespressif32/libraries/WebServer/src/detail/RequestHandler.h \
  /home/parthishere/.platformio/packages/framework-arduinoespressif32/libraries/EEPROM/src/EEPROM.h \
  /home/parthishere/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_wifi/include/esp_now.h \
- /home/parthishere/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_wifi/include/esp_wifi_types.h
+ /home/parthishere/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32/include/esp_wifi/include/esp_wifi_types.h \
+ lib/Arduino_JSON/Arduino_JSON.h lib/Arduino_JSON/JSON.h \
+ lib/Arduino_JSON/JSONVar.h

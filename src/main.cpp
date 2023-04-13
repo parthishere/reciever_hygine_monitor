@@ -7,6 +7,19 @@
 #include <WebServer.h>
 #include <EEPROM.h>
 #include <esp_now.h>
+#include <Arduino_JSON.h>
+
+#define PRINT_STATEMENTS
+
+#if defined(PRINT_STATEMENTS)
+#define debug(x) Serial.print(x)
+#define debugln(x) Serial.println(x)
+#define debugf(x) Serial.printf(x)
+#else
+#define debug(...)
+#define debugln(...)
+#define debugf(...)
+#endif
 
 #define RST_PIN 15
 #define SDA_SS_PIN 5
@@ -22,14 +35,14 @@ void setupAP(void);
 void createWebServer();
 void command(String cmd);
 void send_feedback(int rating);
-void send_footfall(int ratingl, int in_footfalls, int out_footfalls);
-void send_cleaning_activity(int counter, int tag);
+void send_footfall(int in_footfalls, int out_footfalls);
+void send_cleaning_activity(int counter, char *tag);
 
 int i = 0;
 int statusCode, btn1PrevState, btn2PrevState, btn3PrevState;
 const char *ssid = "parth";
 const char *password = "1234567890";
-static int people_count = 0, in_people_count{}, out_people_count;
+static int people_count = 0, in_people_count{}, out_people_count, last_in_footdall_counts, last_out_fotdall_counts;
 String st;
 String content;
 String esid;
@@ -37,7 +50,7 @@ String epass = "";
 int last_millis{-5000};
 int last_time_gps{};
 int count{0};
-
+const char *AuthenticatedTag = "4C93D138";
 
 typedef struct struct_message
 {
@@ -64,29 +77,27 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
 {
   // Copies the sender mac address to a string
   char macStr[18];
-  Serial.print("Packet received from: ");
+  debug("Packet received from: ");
   snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
            mac_addr[0], mac_addr[1], mac_addr[2], mac_addr[3], mac_addr[4], mac_addr[5]);
   Serial.println(macStr);
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
 
-  Serial.printf("distance 1 value (cm): %d \n", incomingReadings.distance_1_cm);
-  Serial.printf("distance 2 value (cm): %d \n", incomingReadings.distance_2_cm);
-  Serial.printf("direction value: %d \n", incomingReadings.direction);
+  // debugf("distance 1 value (cm): %d \n", incomingReadings.distance_1_cm);
+  // debugf("distance 2 value (cm): %d \n", incomingReadings.distance_2_cm);
+  // debugf("direction value: %d \n", incomingReadings.direction);
   lcd.clear();
   if (incomingReadings.direction == 0)
   {
     people_count++;
     in_people_count++;
-   
   }
   else
   {
     people_count--;
     out_people_count++;
-    
   }
-  
+
   lcd.clear();
 
   lcd.setCursor(0, 2);
@@ -99,19 +110,18 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
 
   lcd.setCursor(0, 0);
   lcd.print("Overall Number: ");
-  lcd.print(people_count); 
+  lcd.print(people_count);
   Serial.println();
-  if (in_people_count>5){
-
-  }
-  if (out_people_count>5){
-    
+  if (in_people_count - last_in_footdall_counts > 20)
+  {
+    last_in_footdall_counts = in_people_count;
+    send_footfall(in_people_count, out_people_count);
   }
 }
 
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
 {
-  Serial.print("\r\nLast Packet Send Status:\t");
+  debug("\r\nLast Packet Send Status:\t");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
 }
 
@@ -148,14 +158,14 @@ void setup()
     esid += char(EEPROM.read(i));
   }
   Serial.println();
-  Serial.print("SSID: ");
+  debug("SSID: ");
   Serial.println(esid);
   Serial.println("Reading EEPROM pass");
   for (int i = 32; i < 96; ++i)
   {
     epass += char(EEPROM.read(i));
   }
-  Serial.print("PASS: ");
+  debug("PASS: ");
   Serial.println(epass);
 
   WiFi.mode(WIFI_AP_STA);
@@ -180,7 +190,7 @@ void setup()
 
   while ((WiFi.status() != WL_CONNECTED))
   {
-    Serial.print(".");
+    debug(".");
     delay(10);
     server.handleClient();
   }
@@ -206,14 +216,13 @@ void setup()
     return;
   }
 
- 
   esp_now_send(broadcastAddress, (uint8_t *)&SsidSend, sizeof(SsidSend));
   lcd.clear();
   delay(1000);
 
-  // command("AT+CFUN=1,1"); 
+  // command("AT+CFUN=1,1");
   // delay(10000);
-  
+
   // command("ATI");
   // command("AT+CMEE=1");
   // // GPRS connect
@@ -223,15 +232,12 @@ void setup()
   // command("AT+XIIC=1");
   // command("AT+CGATT=1");
 
-  
-  
   // command("AT+NWCHANNEL=1");
   // command("AT+CGACT=1,1");
-  
 
   // command("AT+HTTPSPARA=url,feedback-247.com/api/hygiene/save_footfall");
   // command("AT+HTTPSPARA=port,443");
-  
+
   // command("AT+HTTPSSETUP");
   // command("AT+HTTPSACTION=0");
   // command("AT+HTTPSCLOSE");
@@ -239,8 +245,8 @@ void setup()
 
   // command("AT+NETSHAREMODE=1");
   // command("AT+NETSHAREACT=2,1,0,airtelgprs.com,card,card,0");
-
 }
+unsigned long int last_time_scaned_rfid;
 
 void loop()
 {
@@ -272,46 +278,60 @@ void loop()
     send_feedback(2);
   }
 
-  MFRC522::MIFARE_Key key;
-  for (byte i = 0; i < 6; i++)
-    key.keyByte[i] = 0xFF;
-  byte block;
-  byte len;
-  MFRC522::StatusCode status;
-
-  if (!mfrc522.PICC_IsNewCardPresent())
-  {
-    return;
-  }
-
-  if (!mfrc522.PICC_ReadCardSerial())
-  {
-    return;
-  }
-
-  Serial.println(F("**Card Detected:**"));
-
-  for (byte i = 0; i < mfrc522.uid.size; i++)
-  {
-    Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : "");
-    Serial.print(mfrc522.uid.uidByte[i], HEX);
-    content.concat(String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : ""));
-    content.concat(String(mfrc522.uid.uidByte[i], HEX));
-  }
-
-  Serial.println("");
-  content.toUpperCase();
-  char *idTag = new char[content.length() + 1];
-  strcpy(idTag, content.c_str());
-
-  lcd.setCursor(0, 0);
-  lcd.print(String(idTag));
-  delay(100);
   // mfrc522.PICC_DumpToSerial(&(mfrc522.uid));      //uncomment this to see all blocks in hex
+  if (millis() - last_time_scaned_rfid > 60000)
+  {
+    lcd.clear();
+    MFRC522::MIFARE_Key key;
+    for (byte i = 0; i < 6; i++)
+      key.keyByte[i] = 0xFF;
+    byte block;
+    byte len;
+    MFRC522::StatusCode status;
 
-  Serial.println(F("\n**End Reading**\n"));
-  content = "";
-  lcd.clear();
+    if (!mfrc522.PICC_IsNewCardPresent())
+    {
+      return;
+    }
+
+    if (!mfrc522.PICC_ReadCardSerial())
+    {
+      return;
+    }
+
+    Serial.println(F("**Card Detected:**"));
+
+    for (byte i = 0; i < mfrc522.uid.size; i++)
+    {
+      // debug(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : "");
+      // debug(mfrc522.uid.uidByte[i], HEX);
+      content.concat(String(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : ""));
+      content.concat(String(mfrc522.uid.uidByte[i], HEX));
+    }
+
+    Serial.println("");
+    content.toUpperCase();
+    char *idTag = new char[content.length() + 1];
+    strcpy(idTag, content.c_str());
+
+    lcd.setCursor(0, 0);
+    lcd.print(String(idTag));
+    delay(100);
+    if (strcmp(idTag, AuthenticatedTag) == 0)
+    {
+      // same tag
+      //  we have to set logic for setting up the senind of id tag
+      debugln("yes inside the authentication");
+      last_time_scaned_rfid = millis();
+      send_cleaning_activity(0, idTag);
+    }
+    Serial.println(F("\n**End Reading**\n"));
+    content = "";
+    lcd.clear();
+    
+  }
+
+  
 }
 
 uint8_t calculate_checksum(uint8_t *data)
@@ -337,7 +357,7 @@ bool testWifi(void)
       return true;
     }
     delay(500);
-    Serial.print("*");
+    debug("*");
     c++;
 
     lcd.setCursor(0, 0);
@@ -389,14 +409,14 @@ void createWebServer()
         for (int i = 0; i < qsid.length(); ++i)
         {
           EEPROM.write(i, qsid[i]);
-          Serial.print("Wrote: ");
+          debug("Wrote: ");
           Serial.println(qsid[i]);
         }
         Serial.println("writing eeprom pass:");
         for (int i = 0; i < qpass.length(); ++i)
         {
           EEPROM.write(32 + i, qpass[i]);
-          Serial.print("Wrote: ");
+          debug("Wrote: ");
           Serial.println(qpass[i]);
         }
         EEPROM.commit();
@@ -418,9 +438,9 @@ void launchWeb()
   Serial.println("");
   if (WiFi.status() == WL_CONNECTED)
     Serial.println("WiFi connected");
-  Serial.print("Local IP: ");
+  debug("Local IP: ");
   Serial.println(WiFi.localIP());
-  Serial.print("SoftAP IP: ");
+  debug("SoftAP IP: ");
   Serial.println(WiFi.softAPIP());
 
   lcd.clear();
@@ -450,17 +470,17 @@ void setupAP(void)
     Serial.println("no networks found");
   else
   {
-    Serial.print(n);
+    debug(n);
     Serial.println(" networks found");
     for (int i = 0; i < n; ++i)
     {
       // Print SSID and RSSI for each network found
-      Serial.print(i + 1);
-      Serial.print(": ");
-      Serial.print(WiFi.SSID(i));
-      Serial.print(" (");
-      Serial.print(WiFi.RSSI(i));
-      Serial.print(")");
+      debug(i + 1);
+      debug(": ");
+      debug(WiFi.SSID(i));
+      debug(" (");
+      debug(WiFi.RSSI(i));
+      debug(")");
       // Serial.println((WiFi.encryptionType(i) == ENC_TYPE_NONE) ? " " : "*");
       delay(10);
     }
@@ -488,130 +508,156 @@ void setupAP(void)
 
 String serverNameforSaveFeedback = "https://feedback-247.com/api/hygiene/save_feedback";
 
-void send_feedback(int rating){
-  if(WiFi.status() == WL_CONNECTED) {
-        WiFiClientSecure client;
-        // HTTPClient http;
-        client.setInsecure();
-        
+void send_feedback(int rating)
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFiClientSecure client;
+    // HTTPClient http;
+    client.setInsecure();
 
-        Serial.print("[HTTP] begin...\n");
-        // configure traged server and url
-        //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
-        String data = "monitor_no="+ String(MONITOR_NUMBER) +"&rating="+rating;     
-  
-        if (client.connect("feedback-247.com", 443)) {
-          client.println("POST /api/hygiene/save_feedback HTTP/1.1");
-          client.println("Host: feedback-247.com");
-          client.println("User-Agent: ESP32");
-          client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
-          client.println("Content-Type: application/x-www-form-urlencoded;");
-          client.println("Content-Length: "+String(data.length()));
-          client.println();
-          client.println(data);
-          Serial.println(F("Data were sent successfully"));
-           while (client.available() == 0)
-            ;
-          while (client.available())
-          {
-            char c = client.read();
-            Serial.write(c);
-          }
-          
-        } 
+    debug("[HTTP] begin...\n");
+    // configure traged server and url
+    // http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
+    String data = "monitor_no=" + String(MONITOR_NUMBER) + "&rating=" + rating;
 
-        else {
-          Serial.println(F("Connection wasnt established"));
-        }
-        Serial.println("we got the responnse");
-        client.stop();
+    if (client.connect("feedback-247.com", 443))
+    {
+      client.println("POST /api/hygiene/save_feedback HTTP/1.1");
+      client.println("Host: feedback-247.com");
+      client.println("User-Agent: ESP32");
+      client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
+      client.println("Content-Type: application/x-www-form-urlencoded;");
+      client.println("Content-Length: " + String(data.length()));
+      client.println();
+      client.println(data);
+      Serial.println(F("Data were sent successfully"));
+      while (client.available() == 0)
+        ;
+      String c{};
+      while (client.available())
+      {
+        c += (char)client.read();
+      }
+
+      Serial.println(c);
+      JSONVar myObject = JSON.parse(c);
+      if (JSON.typeof(myObject) == "undefined")
+      {
+        Serial.println("Parsing input failed!");
+      }
+
+      debug("JSON object = ");
+      Serial.println(myObject);
+
+      // myObject.keys() can be used to get an array of all the keys in the object
+      JSONVar keys = myObject.keys();
+
+      for (int i = 0; i < keys.length(); i++)
+      {
+        JSONVar value = myObject[keys[i]];
+        debug(keys[i]);
+        debug(" = ");
+        Serial.println(value);
+      }
     }
+
+    else
+    {
+      Serial.println(F("Connection wasnt established"));
+    }
+    Serial.println("we got the responnse");
+    client.stop();
+  }
 }
 
-void send_footfall(int ratingl, int in_footfalls, int out_footfalls){
-  if(WiFi.status() == WL_CONNECTED) {
-        WiFiClientSecure client;
-        // HTTPClient http;
-        client.setInsecure();
-        
+void send_footfall(int in_footfalls, int out_footfalls)
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFiClientSecure client;
+    // HTTPClient http;
+    client.setInsecure();
 
-        Serial.print("[HTTP] begin...\n");
-        // configure traged server and url
-        //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
-        String data = "monitor_no="+ String(MONITOR_NUMBER) +"&in_footfalls="+in_footfalls+"&out_footfalls="+out_footfalls;     
-  
-        if (client.connect("feedback-247.com", 443)) {
-          client.println("POST /api/hygiene/save_footfall HTTP/1.1");
-          client.println("Host: feedback-247.com");
-          client.println("User-Agent: ESP32");
-          client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
-          client.println("Content-Type: application/x-www-form-urlencoded;");
-          client.println("Content-Length: "+String(data.length()));
-          client.println();
-          client.println(data);
-          Serial.println(F("Data were sent successfully"));
-           while (client.available() == 0)
-            ;
-          while (client.available())
-          {
-            char c = client.read();
-            Serial.write(c);
-          }
-          
-        } 
+    debug("[HTTP] begin...\n");
+    // configure traged server and url
+    // http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
+    String data = "monitor_no=" + String(MONITOR_NUMBER) + "&in_footfalls=" + in_footfalls + "&out_footfalls=" + out_footfalls;
 
-        else {
-          Serial.println(F("Connection wasnt established"));
-        }
-        Serial.println("we got the responnse");
-        client.stop();
+    if (client.connect("feedback-247.com", 443))
+    {
+      client.println("POST /api/hygiene/save_footfall HTTP/1.1");
+      client.println("Host: feedback-247.com");
+      client.println("User-Agent: ESP32");
+      client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
+      client.println("Content-Type: application/x-www-form-urlencoded;");
+      client.println("Content-Length: " + String(data.length()));
+      client.println();
+      client.println(data);
+      Serial.println(F("Data were sent successfully"));
+      while (client.available() == 0)
+        ;
+      while (client.available())
+      {
+        char c = client.read();
+        Serial.write(c);
+      }
     }
+
+    else
+    {
+      Serial.println(F("Connection wasnt established"));
+    }
+    Serial.println("we got the responnse");
+    client.stop();
+  }
 }
 
-void send_cleaning_activity(int counter, int tag){
-  if(WiFi.status() == WL_CONNECTED) {
-        WiFiClientSecure client;
-        // HTTPClient http;
-        client.setInsecure();
-        
+void send_cleaning_activity(int counter, char *tag)
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFiClientSecure client;
+    // HTTPClient http;
+    client.setInsecure();
 
-        Serial.print("[HTTP] begin...\n");
-        // configure traged server and url
-        //http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
-        String data = "monitor_no="+ String(MONITOR_NUMBER) +"&counter="+counter;   
-  
-        if (client.connect("feedback-247.com", 443)) {
-          client.println("POST /api/hygiene/save_footfall HTTP/1.1");
-          client.println("Host: feedback-247.com");
-          client.println("User-Agent: ESP32");
-          client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
-          client.println("Content-Type: application/x-www-form-urlencoded;");
-          client.println("Content-Length: "+String(data.length()));
-          client.println();
-          client.println(data);
-          Serial.println(F("Data were sent successfully"));
-           while (client.available() == 0)
-            ;
-          while (client.available())
-          {
-            char c = client.read();
-            Serial.write(c);
-          }
-          
-        } 
+    debug("[HTTP] begin...\n");
+    // configure traged server and url
+    // http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
+    String data = "monitor_no=" + String(MONITOR_NUMBER) + "&counter=" + counter + "&RFID=" + String(tag);
 
-        else {
-          Serial.println(F("Connection wasnt established"));
-        }
-        Serial.println("we got the responnse");
-        client.stop();
+    if (client.connect("feedback-247.com", 443))
+    {
+      client.println("POST /api/hygiene/save_cleaning_activity HTTP/1.1");
+      client.println("Host: feedback-247.com");
+      client.println("User-Agent: ESP32");
+      client.println("Authorization: Bearer 6oYYocRGUQ1Qc33s2jfOlCLDeBFO7i4Yist4KqI1GRGRuKczlH");
+      client.println("Content-Type: application/x-www-form-urlencoded;");
+      client.println("Content-Length: " + String(data.length()));
+      client.println();
+      client.println(data);
+      Serial.println(F("Data were sent successfully"));
+      while (client.available() == 0)
+        ;
+      while (client.available())
+      {
+        char c = client.read();
+        Serial.write(c);
+      }
     }
-}
 
+    else
+    {
+      Serial.println(F("Connection wasnt established"));
+    }
+    Serial.println("we got the responnse");
+    client.stop();
+  }
+}
 
 void command(String cmd)
 {
-  Serial.print("Sent Command: ");
+  debug("Sent Command: ");
   Serial.println(cmd);
   Serial2.println(cmd);
   Serial2.write(0x0d);
