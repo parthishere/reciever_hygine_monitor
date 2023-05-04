@@ -8,6 +8,10 @@
 #include <EEPROM.h>
 #include <esp_now.h>
 #include <Arduino_JSON.h>
+#include <SoftwareSerial.h>
+
+#define MYPORT_TX 21
+#define MYPORT_RX 22
 
 #define PRINT_STATEMENTS
 
@@ -29,6 +33,8 @@
 
 #define MAX_IN_COUNT 10
 #define MONITOR_NUMBER 1100122
+
+EspSoftwareSerial::UART myPort;
 
 bool testWifi(void);
 void launchWeb(void);
@@ -264,13 +270,13 @@ void loop()
     lcd.print("Data Sent ");
     delay(1000);
     lcd.clear();
-  myPort.begin(115200, SWSERIAL_8N1, MYPORT_RX, MYPORT_TX, false);
-  if (!myPort) {  // If the object did not initialize, then its configuration is invalid
-    Serial.println("Invalid EspSoftwareSerial pin configuration, check config");
-    while (1) {  // Don't continue with invalid configuration
-      delay(1000);
+    myPort.begin(115200, SWSERIAL_8N1, MYPORT_RX, MYPORT_TX, false);
+    if (!myPort) {  // If the object did not initialize, then its configuration is invalid
+      Serial.println("Invalid EspSoftwareSerial pin configuration, check config");
+      while (1) {  // Don't continue with invalid configuration
+        delay(1000);
+      }
     }
-  }
   }
   if (digitalRead(BTN1) == 0)
   {
