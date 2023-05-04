@@ -27,6 +27,7 @@
 #define BTN2 14
 #define BTN3 27
 
+#define MAX_IN_COUNT 10
 #define MONITOR_NUMBER 1100122
 
 bool testWifi(void);
@@ -50,7 +51,7 @@ String epass = "";
 int last_millis{-5000};
 int last_time_gps{};
 int count{0};
-const char *AuthenticatedTag = "4C93D138";
+const char *AuthenticatedTag = "E3E7719B";
 
 typedef struct struct_message
 {
@@ -73,6 +74,7 @@ WebServer server(80);
 // A0:76:4E:1A:92:98
 uint8_t broadcastAddress[] = {0xA0, 0x76, 0x4E, 0x1A, 0x92, 0x98};
 
+volatile bool send_the_data = false;
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
 {
   // Copies the sender mac address to a string
@@ -85,8 +87,10 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
 
   // debugf("distance 1 value (cm): %d \n", incomingReadings.distance_1_cm);
   // debugf("distance 2 value (cm): %d \n", incomingReadings.distance_2_cm);
-  // debugf("direction value: %d \n", incomingReadings.direction);
-  lcd.clear();
+  debug("direction value: "); 
+  debugln(incomingReadings.direction);
+
+
   if (incomingReadings.direction == 0)
   {
     people_count++;
@@ -112,10 +116,11 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
   lcd.print("Overall Number: ");
   lcd.print(people_count);
   Serial.println();
-  if (in_people_count - last_in_footdall_counts > 20)
+  if (in_people_count - last_in_footdall_counts > MAX_IN_COUNT)
   {
     last_in_footdall_counts = in_people_count;
-    send_footfall(in_people_count, out_people_count);
+    send_the_data = true;
+    
   }
 }
 
@@ -247,10 +252,26 @@ void setup()
   // command("AT+NETSHAREACT=2,1,0,airtelgprs.com,card,card,0");
 }
 unsigned long int last_time_scaned_rfid;
-
+bool once{false};
 void loop()
 {
+  if (send_the_data == true){
+    send_footfall(in_people_count, out_people_count);
+    send_the_data = false;
+    lcd.clear();
 
+    lcd.setCursor(0, 2);
+    lcd.print("Data Sent ");
+    delay(1000);
+    lcd.clear();
+  myPort.begin(115200, SWSERIAL_8N1, MYPORT_RX, MYPORT_TX, false);
+  if (!myPort) {  // If the object did not initialize, then its configuration is invalid
+    Serial.println("Invalid EspSoftwareSerial pin configuration, check config");
+    while (1) {  // Don't continue with invalid configuration
+      delay(1000);
+    }
+  }
+  }
   if (digitalRead(BTN1) == 0)
   {
     lcd.clear();
@@ -281,7 +302,10 @@ void loop()
   // mfrc522.PICC_DumpToSerial(&(mfrc522.uid));      //uncomment this to see all blocks in hex
   if (millis() - last_time_scaned_rfid > 60000)
   {
-    lcd.clear();
+    if (once == false){
+      lcd.clear();
+      once = true;
+    }
     MFRC522::MIFARE_Key key;
     for (byte i = 0; i < 6; i++)
       key.keyByte[i] = 0xFF;
@@ -324,6 +348,7 @@ void loop()
       debugln("yes inside the authentication");
       last_time_scaned_rfid = millis();
       send_cleaning_activity(0, idTag);
+      once = false;
     }
     Serial.println(F("\n**End Reading**\n"));
     content = "";
@@ -577,12 +602,14 @@ void send_footfall(int in_footfalls, int out_footfalls)
   {
     WiFiClientSecure client;
     // HTTPClient http;
+    delay(100);
     client.setInsecure();
 
     debug("[HTTP] begin...\n");
     // configure traged server and url
     // http.begin("https://www.howsmyssl.com/a/check", ca); //HTTPS
     String data = "monitor_no=" + String(MONITOR_NUMBER) + "&in_footfalls=" + in_footfalls + "&out_footfalls=" + out_footfalls;
+    delay(100);
 
     if (client.connect("feedback-247.com", 443))
     {
