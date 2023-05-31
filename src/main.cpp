@@ -44,6 +44,7 @@ void command(String cmd);
 void send_feedback(int rating);
 void send_footfall(int in_footfalls, int out_footfalls);
 void send_cleaning_activity(int counter, char *tag);
+void dataWriteTouch(int value, byte address_h, byte address_l);
 
 int i = 0;
 int statusCode, btn1PrevState, btn2PrevState, btn3PrevState;
@@ -57,7 +58,28 @@ String epass = "";
 int last_millis{-5000};
 int last_time_gps{};
 int count{0};
+
 const char *AuthenticatedTag = "E3E7719B";
+unsigned long int last_time_scaned_rfid;
+unsigned long int last_time_send_number;
+bool once{false};
+
+int add_happy_sad_ok[2] = {1, 0};
+
+int reset_to_prev_add[2] = {11, 0};
+
+byte happy[2] = {0x00, 0x00};
+byte sad[2] = {0x00, 0x02};
+byte ok[2] = {0x00, 0x01};
+bool got_the_data = false;
+
+byte read_signal;
+byte tdata[200];
+int count_to;
+int len_of_data;
+bool start_count;
+long int prev_millis{};
+byte address[2];
 
 typedef struct struct_message
 {
@@ -67,6 +89,11 @@ typedef struct struct_message
 } struct_message;
 struct_message incomingReadings;
 
+union IntToBytes {
+  int value;
+  uint8_t bytes[8];
+};
+
 typedef struct ssid_send
 {
   String ssid;
@@ -74,16 +101,17 @@ typedef struct ssid_send
 ssid_send SsidSend;
 
 MFRC522 mfrc522(SDA_SS_PIN, RST_PIN);
-LiquidCrystal_I2C lcd(0x27, 20, 4);
+// LiquidCrystal_I2C lcd(0x27, 20, 4);
 WebServer server(80);
 
 // A0:76:4E:1A:92:98
 uint8_t broadcastAddress[] = {0xA0, 0x76, 0x4E, 0x1A, 0x92, 0x98};
 
 volatile bool send_the_data = false;
+volatile bool new_data_available {false};
 void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
 {
-  // Copies the sender mac address to a string
+
   char macStr[18];
   debug("Packet received from: ");
   snprintf(macStr, sizeof(macStr), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -91,11 +119,8 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
   Serial.println(macStr);
   memcpy(&incomingReadings, incomingData, sizeof(incomingReadings));
 
-  // debugf("distance 1 value (cm): %d \n", incomingReadings.distance_1_cm);
-  // debugf("distance 2 value (cm): %d \n", incomingReadings.distance_2_cm);
-  debug("direction value: "); 
+  debug("direction value: ");
   debugln(incomingReadings.direction);
-
 
   if (incomingReadings.direction == 0)
   {
@@ -108,26 +133,52 @@ void OnDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len)
     out_people_count++;
   }
 
-  lcd.clear();
-
-  lcd.setCursor(0, 2);
-  lcd.print("Out : ");
-  lcd.print(out_people_count);
-
-  lcd.setCursor(0, 1);
-  lcd.print("In : ");
-  lcd.print(in_people_count);
-
-  lcd.setCursor(0, 0);
-  lcd.print("Overall Number: ");
-  lcd.print(people_count);
-  Serial.println();
+  new_data_available = true;
+  
   if (in_people_count - last_in_footdall_counts > MAX_IN_COUNT)
   {
     last_in_footdall_counts = in_people_count;
     send_the_data = true;
-    
   }
+}
+
+// 5a a5 07 82 00 84 5a 01 00 00
+
+void dataWriteTouch(int value, byte address_h, byte address_l)
+{
+
+  IntToBytes data;
+  data.value = value;
+  
+  Serial.println();
+  Serial.println(data.value);
+  Serial.print(data.bytes[0], HEX);
+  Serial.print(" ");
+  Serial.print(data.bytes[1], HEX);
+  Serial.print(" ");
+  Serial.print(data.bytes[2], HEX);
+  Serial.print(" ");
+  Serial.print(data.bytes[3], HEX);
+  Serial.print(" ");
+  Serial.print(data.bytes[4], HEX);
+  Serial.print(" ");
+  Serial.print(data.bytes[5], HEX);
+  Serial.print(" ");
+  Serial.print(data.bytes[6], HEX);
+  Serial.print(" ");
+  Serial.print(data.bytes[7], HEX);
+  Serial.print(" ");
+  Serial.println();
+
+  byte array[14] = {0x5a, 0xa5, 0x0b, 0x82, address_h, address_l, data.bytes[7], data.bytes[6], data.bytes[5], data.bytes[4], data.bytes[3], data.bytes[2], data.bytes[1], data.bytes[0]};
+  myPort.write(array, 14);
+
+  // byte hex[8];
+  // byte * data = reinterpret_cast<byte*> (&value);
+  // memcpy(hex, data, 8);
+  // byte array[14] = { 0x5a, 0xa5, 0x0b, 0x82, address_h, address_l, hex[7], hex[6], hex[5], hex[4], hex[3], hex[2], hex[1], hex[0]};
+
+  //   myPort.write(array, 14);
 }
 
 void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status)
@@ -140,6 +191,16 @@ void setup()
 {
   Serial.begin(9600);
   Serial2.begin(115200);
+
+  myPort.begin(115200, SWSERIAL_8N1, MYPORT_RX, MYPORT_TX, false);
+  if (!myPort)
+  { // If the object did not initialize, then its configuration is invalid
+    Serial.println("Invalid EspSoftwareSerial pin configuration, check config");
+    while (1)
+    { // Don't continue with invalid configuration
+      delay(1000);
+    }
+  }
   pinMode(BTN1, INPUT_PULLUP);
   pinMode(BTN2, INPUT_PULLUP);
   pinMode(BTN3, INPUT_PULLUP);
@@ -149,12 +210,6 @@ void setup()
   SPI.begin();
   mfrc522.PCD_Init();
   Serial.println(F("Read personal data on a MIFARE PICC:"));
-
-  lcd.init();
-
-  lcd.backlight();
-  lcd.setCursor(3, 0);
-  lcd.print("Hello, world!");
 
   EEPROM.begin(512);
   delay(10);
@@ -185,12 +240,6 @@ void setup()
 
   if (!testWifi())
   {
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Connection Status Negative");
-    lcd.setCursor(0, 1);
-    lcd.print("Turning the HotSpot On");
-
     Serial.println("Connection Status Negative");
     Serial.println("Turning the HotSpot On");
     launchWeb();
@@ -228,88 +277,131 @@ void setup()
   }
 
   esp_now_send(broadcastAddress, (uint8_t *)&SsidSend, sizeof(SsidSend));
-  lcd.clear();
   delay(1000);
 
-  // command("AT+CFUN=1,1");
-  // delay(10000);
-
-  // command("ATI");
-  // command("AT+CMEE=1");
-  // // GPRS connect
-  // command("AT+NETAPN=\"airtelgprs.com\",\"\",\"\"");
-
-  // command("AT+CGDCONT=1,\"IP\",\"airtelgprs.com\"");
-  // command("AT+XIIC=1");
-  // command("AT+CGATT=1");
-
-  // command("AT+NWCHANNEL=1");
-  // command("AT+CGACT=1,1");
-
-  // command("AT+HTTPSPARA=url,feedback-247.com/api/hygiene/save_footfall");
-  // command("AT+HTTPSPARA=port,443");
-
-  // command("AT+HTTPSSETUP");
-  // command("AT+HTTPSACTION=0");
-  // command("AT+HTTPSCLOSE");
-  // command("+HTTPSRECV");
-
-  // command("AT+NETSHAREMODE=1");
-  // command("AT+NETSHAREACT=2,1,0,airtelgprs.com,card,card,0");
+  dataWriteTouch(0, 0x14, 0x00);
+  dataWriteTouch(0, 0x15, 0x00);
+  dataWriteTouch(0, 0x16, 0x00);
 }
-unsigned long int last_time_scaned_rfid;
-bool once{false};
+
 void loop()
 {
-  if (send_the_data == true){
-    send_footfall(in_people_count, out_people_count);
-    send_the_data = false;
-    lcd.clear();
 
-    lcd.setCursor(0, 2);
-    lcd.print("Data Sent ");
-    delay(1000);
-    lcd.clear();
-    myPort.begin(115200, SWSERIAL_8N1, MYPORT_RX, MYPORT_TX, false);
-    if (!myPort) {  // If the object did not initialize, then its configuration is invalid
-      Serial.println("Invalid EspSoftwareSerial pin configuration, check config");
-      while (1) {  // Don't continue with invalid configuration
-        delay(1000);
+  while (myPort.available())
+  {
+    read_signal = myPort.read();
+    // Serial.print(read_signal, HEX);
+    // Serial.print(" ");
+    if (read_signal == 0x5a)
+    {
+      start_count = true;
+    }
+    if (start_count == true)
+    {
+      count_to++;
+    }
+
+    if (count_to == 3)
+    {
+      len_of_data = read_signal; // 05
+    }
+
+    else if (count_to > 4)
+    {
+      tdata[len_of_data - 3];
+      for (int i = 0; i < len_of_data - 2; i++)
+      {
+
+        if (i == 0)
+        {
+
+          while (!myPort.available())
+            ;
+          address[1] = (byte)myPort.read();
+        }
+        else if (i == 1)
+        {
+          while (!myPort.available())
+            ;
+          address[0] = (byte)myPort.read();
+        }
+        else if (i > 1)
+        {
+          while (!myPort.available())
+            ;
+          tdata[i - 2] = myPort.read();
+        }
       }
+      start_count = false;
+      count_to = 0;
+
+      // Serial.print("Address: ");
+      // for (int i = 0; i < 2; i++)
+      // {
+      //   Serial.print(address[i], HEX);
+      //   Serial.print(" ");
+      // }
+      // Serial.println();
+
+      // Serial.print("Data: ");
+      // for (int i = 0; i < len_of_data - 3 - 1; i++)
+      // {
+      //   Serial.print(tdata[i], HEX);
+      //   Serial.print(" ");
+      // }
+      // Serial.println();
+      // Serial.println("Got the data");
+
+      got_the_data = true;
     }
   }
-  if (digitalRead(BTN1) == 0)
+
+  if (send_the_data == true)
   {
-    lcd.clear();
-    lcd.print("Bad");
+    send_footfall(in_people_count, out_people_count);
+    send_the_data = false;
+  }
+
+  if (!memcmp(tdata, sad, sizeof(ok)) && !memcmp(address, add_happy_sad_ok, sizeof(ok)) && got_the_data)
+  {
+    Serial.println("BAd");
     delay(2000);
-    lcd.clear();
     send_feedback(0);
   }
 
-  if (digitalRead(BTN2) == 0)
+  if (!memcmp(tdata, ok, sizeof(ok)) && !memcmp(address, add_happy_sad_ok, sizeof(ok)) && got_the_data)
   {
-    lcd.clear();
-    lcd.print("Medium");
+
+    Serial.println("Medium");
     delay(2000);
-    lcd.clear();
     send_feedback(1);
   }
 
-  if (digitalRead(BTN3) == 0)
+  if (!memcmp(tdata, happy, sizeof(ok)) && !memcmp(address, add_happy_sad_ok, sizeof(ok)) && got_the_data)
   {
-    lcd.clear();
-    lcd.print("Good");
+    Serial.println("Good");
     delay(2000);
-    lcd.clear();
     send_feedback(2);
   }
 
+  memset(tdata, 0, sizeof tdata);
+  memset(address, 0, sizeof address);
+
+  got_the_data = false;
   // mfrc522.PICC_DumpToSerial(&(mfrc522.uid));      //uncomment this to see all blocks in hex
+  if (new_data_available == true)
+  {
+    Serial.println("heya");
+    dataWriteTouch(in_people_count, 0x14, 0x00);
+    dataWriteTouch(abs(in_people_count - out_people_count), 0x15, 0x00);
+    dataWriteTouch(out_people_count, 0x16, 0x00);
+    last_time_send_number = millis();
+    new_data_available = false;
+  }
   if (millis() - last_time_scaned_rfid > 60000)
   {
-    if (once == false){
-      lcd.clear();
+    if (once == false)
+    {
       once = true;
     }
     MFRC522::MIFARE_Key key;
@@ -344,8 +436,6 @@ void loop()
     char *idTag = new char[content.length() + 1];
     strcpy(idTag, content.c_str());
 
-    lcd.setCursor(0, 0);
-    lcd.print(String(idTag));
     delay(100);
     if (strcmp(idTag, AuthenticatedTag) == 0)
     {
@@ -358,11 +448,7 @@ void loop()
     }
     Serial.println(F("\n**End Reading**\n"));
     content = "";
-    lcd.clear();
-    
   }
-
-  
 }
 
 uint8_t calculate_checksum(uint8_t *data)
@@ -378,8 +464,7 @@ uint8_t calculate_checksum(uint8_t *data)
 bool testWifi(void)
 {
   int c = 0;
-  // Serial.println("Waiting for Wifi to connect");
-  lcd.clear();
+
   while (c < 20)
   {
 
@@ -390,11 +475,8 @@ bool testWifi(void)
     delay(500);
     debug("*");
     c++;
-
-    lcd.setCursor(0, 0);
-    lcd.print("Waiting for WiFi");
   }
-  lcd.clear();
+
   Serial.println("");
   Serial.println("Connect timed out, opening AP");
   digitalWrite(LED_BUILTIN, HIGH);
@@ -473,19 +555,9 @@ void launchWeb()
   Serial.println(WiFi.localIP());
   debug("SoftAP IP: ");
   Serial.println(WiFi.softAPIP());
-
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Connect to AP ");
-  lcd.setCursor(0, 1);
-  lcd.print("GridenPower in WiFi");
-  lcd.setCursor(0, 2);
-  lcd.print("IP(open in chrome): ");
-  lcd.setCursor(0, 3);
-  lcd.print(WiFi.softAPIP());
   delay(1000);
   createWebServer();
-  // Start the server
+
   server.begin();
   Serial.println("Server started");
 }
